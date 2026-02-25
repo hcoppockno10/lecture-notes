@@ -1,0 +1,20 @@
+# List of Symbols {.unnumbered}
+
+| Symbol | Description |
+|--------|-------------|
+| $b$ | Batch size |
+| $B$ | Number of bits per parameter |
+| $C$ | Total compute budget (FLOPs) |
+| $d$ | Hidden dimension of the model |
+| $d'$ | Compressed latent dimension (MLA) |
+| $d_{\mathrm{kv}}$ | Key--value head dimension |
+| $D$ | Dataset size (number of tokens) |
+| $K$ | Number of active experts (top-$K$ routing) |
+| $L$ | Number of layers |
+| $M$ | Memory requirement (bytes) |
+| $n$ | Sequence length |
+| $N_e$ | Total number of experts |
+| $n_h$ | Number of attention heads |
+| $P$ | Number of model parameters |
+| $r$ | LoRA rank |
+| $s$ | Number of gradient accumulation steps |

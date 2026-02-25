@@ -1,0 +1,9 @@
+[project]
+name = "lecture-notes"
+version = "1.0.0"
+description = "Deep Learning at Scale for the GPU Poor — COMP70010 Lecture Notes"
+requires-python = ">=3.12"
+dependencies = [
+    "quarto-cli>=1.4.0",
+    "jupyter>=1.0.0",
+]

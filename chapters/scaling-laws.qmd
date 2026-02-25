@@ -1,0 +1,91 @@
+# Scaling Laws {#sec-scaling-laws}
+## Train-Time Scaling {#sec-train-time-scaling}
+Many researchers have asked the question: as you scale the three ingredients of deep learning---model size, dataset size, and compute---how does performance change? Following on from this, given a fixed budget for training a model, how much should you scale each ingredient to be "compute-optimal"? Here we investigate these findings, what the implications are and current open questions. Most importantly, I hope to convince you why you should spend significant effort on scaling up your deep learning projects, and how to do so effectively.
+
+Given these findings, we have seen an unprecedented increase in the scale of frontier models (see @fig-epoch-ml-trends).
+
+![Key trends in machine learning: training compute, dataset size, and model parameters have all grown by many orders of magnitude over time. Source: @EpochAIModels2025.](../figures/epoch-ml-trends.svg){#fig-epoch-ml-trends}
+
+::: {.column-margin}
+If you read a book every day for 70 years, that is roughly $25{,}000$ books. At ${\sim}100{,}000$ tokens per book, that is $\approx 2.5 \times 10^9$ tokens in a lifetime. GPT-4 was trained on $5 \times 10^{12}$ tokens---about 2,000 human lifetimes of non-stop reading.
+:::
+
+::: {.column-margin}
+Grok 3 was trained using $\approx 6 \times 10^{26}$ FLOPs---roughly 1,000 moles of floating-point operations. If you were given one atom of gold for every FLOP, you would have $1{,}000 \times 197\text{ g} \approx 200\text{ kg}$ of gold.
+:::
+
+Kaplan et al. [@kaplan2020scaling] showed that cross-entropy loss $L$ on language modelling tasks (next token prediction) follows power laws in each of the three scaling dimensions:
+
+$$
+L(x) = \left(\frac{x_c}{x}\right)^{\!\alpha_x}
+$$ {#eq-scaling-law}
+
+where $x$ is one of: number of parameters $P$, dataset size $D$, or compute budget $C$, and $x_c$, $\alpha_x$ are empirically fitted constants. Crucially, these power laws hold over many orders of magnitude.
+
+![Language modelling performance improves smoothly as we increase model size, dataset size, and the amount of compute used for training. For optimal performance all three factors must be scaled up in tandem. Empirical performance has a power-law relationship with each individual factor when not bottlenecked by the other two. Source: @kaplan2020scaling.](../figures/kaplan.svg){#fig-kaplan}
+
+These scaling laws imply that performance improves smoothly and predictably with scale. There are no sudden "phase transitions" in the loss curves---larger models, more data, and more compute reliably produce better models. This had two important consequences for the industry: first, scaling laws gave companies a clear engineering objective---improving performance reduced to spending more compute; and second, companies balanced the three ingredients (parameters, data, and compute) according to the findings in [@kaplan2020scaling].
+
+Hoffmann et al. [@hoffmann2022training] (the "Chinchilla" paper) identified an issue in the Kaplan experimental setup: all runs used a fixed learning-rate schedule, one designed for $\sim$ 130B tokens. This made training on fewer tokens look less effective for smaller models than it really is, biasing the compute-optimal recommendation towards bigger models trained on relatively fewer tokens. As a consequence, the field had systematically trained models that were too large on too little data---GPT-3 (175B parameters), for example, was trained on only 300B tokens. This serves as a cautionary tale: empirical scaling laws are only as reliable as the experimental design behind them.
+
+![Predictions from three different approaches for compute-optimal model size from @hoffmann2022training, overlaid with projections from @kaplan2020scaling. @hoffmann2022training predict that models should be substantially smaller and trained on much more data than was standard practice. Chinchilla outperforms Gopher and other large models at the same compute budget. Source: @hoffmann2022training.](../figures/hoffman.svg){#fig-hoffmann}
+
+The corrected compute-optimal recipe from @fig-hoffmann allocates compute roughly equally between model size and data:
+
+$$
+D^* \approx 20 \times P^*.
+$$
+
+That is, the optimal number of training tokens is approximately 20 times the number of parameters. The Chinchilla-optimal allocation for GPT-3's compute budget would have been a 70B-parameter model trained on 1.4T tokens.
+
+[Scaling laws provide empirical support for Sutton's "Bitter Lesson" [@sutton2019bitter]: methods that leverage available computation tend to outperform ones that leverage human priors on how intelligence should be structured.]{.column-margin}
+
+These scaling laws also extend beyond language. Henighan et al. [@henighan2020scaling] showed that the same power-law relationships hold for autoregressive generative modelling across images, video, mathematical problem solving, and multimodal domains. Muennighoff et al. [@muennighoff2023scaling] extend the analysis to the data-constrained regime, showing that when unique data is exhausted and tokens must be repeated across epochs, returns degrade predictably---up to a point where additional compute is better spent on more parameters than on further repetitions.
+
+### Scaling laws in 2026
+
+Recently there has been some skepticism of scaling. These revolve around rumours of diminishing returns, bottlenecked resources and other algorithmic improvements that might make scaling less important.
+
+Rumours have emerged suggesting that the next generation of frontier models was delivering smaller performance jumps than previous generations. OpenAI's GPT-4.5---originally intended to be GPT-5---was reportedly only a moderate improvement over GPT-4; some researchers at the company believed it was not reliably better than its predecessor on certain tasks, despite a massive increase in training cost [@rosenblatt2025orion]. This fuelled a broader narrative that pre-training scaling had hit a wall. Prominent figures added to the discourse: Sutskever declared at NeurIPS 2024 that "pre-training as we know it will unquestionably end" [@sutskever2024neurips].
+
+Even if scaling works, we may be bottlenecked in our ability to do it. Sevilla et al. [@epoch2024canaiscalingcontinuethrough2030] project that training runs of $2 \times 10^{29}$ FLOPs will be feasible by 2030---comparable to the jump from GPT-2 to GPT-4---but identify power consumption and chip manufacturing as the binding constraints. Single data centres of 1--5 GW are plausible, though proposals for geographically distributed training (and even orbital data centres [@musk2026orbital]) highlight how extreme the engineering is becoming.
+
+There are also strong reasons to believe algorithmic improvements now matter more than raw scale. Hooker [-@hooker2025scaling] argues that our understanding of why models need so many parameters remains remarkably shallow: we can prune the vast majority of weights after training, with little performance loss, yet those same weights appear essential during training (more on this later!). If we understood this gap, far more efficient training algorithms might follow (humans can perform impressive cognitive tasks fuelled by nothing more than a chocolate bar). This is compatible with Sutton's Bitter Lesson [@sutton2019bitter], which advocates scaling compute when you can, but does not claim it is always the most efficient path.
+
+The more nuanced reading is that the easiest scaling wins---simply making models bigger on web-crawled data---are indeed exhausted, but progress has shifted to data quality, post-training techniques, and inference-time compute scaling (see @sec-inference-scaling). This is good news for computer scientists: first, the practical scaling techniques introduced in the remainder of this chapter will let you operate at the frontier of what is possible with your available compute; and second, we are back in a world where scientific breakthroughs in algorithms and data quality can matter as much as sheer scale.
+
+<!-- [placeholder] a note on safety and responsible scaling laws? dangers. Emergence + mamilian brain. -->
+
+## Inference-Time Scaling {#sec-inference-scaling}
+
+<!-- [think about adding the inspect multiplication example] -->
+
+While the scaling laws above focus on training compute, a recent paradigm shift has emerged: scaling compute at inference time can also dramatically improve performance. Traditional scaling invests compute during training: more FLOPs, more data, larger models. Inference-time scaling instead invests additional compute when generating each answer, by having the model "think longer" before producing a response.
+
+One of the simplest forms of inference-time scaling is repeated sampling: generate $k$ independent solutions. Brown et al. [@brown2024largelanguagemonkeysscaling] studied this approach systematically and found that pass@$k$ scales log-linearly with the number of samples $k$. As shown in @fig-parallel-swe, even a weaker model can surpass the single-attempt state of the art by simply generating more candidate solutions.
+
+![Repeated sampling on SWE-bench Lite: coverage (pass@$k$) increases log-linearly with the number of samples. With enough attempts, a weaker model (DeepSeek-Coder-V2-Instruct) surpasses the single-attempt state of the art. Source: @brown2024largelanguagemonkeysscaling.](../figures/parallel-swe.png){#fig-parallel-swe}
+
+This approach is particularly effective in verifiable domains---settings where candidate solutions can be checked automatically--- or multiple attempts are cheap. Software engineering is a natural fit: if you can write unit tests for a task, you can generate many candidate patches and keep the one that passes. Mathematical proof is another: a proof can be mechanically verified even if finding it is hard. More broadly, any domain with a cheap verification oracle turns repeated sampling into a reliable strategy for trading compute for correctness.
+
+::: {.column-margin}
+![Progressively improving inference-time prompting techniques---random few-shot, chain-of-thought, kNN-based example selection, and ensembling with choice shuffling---each adding accuracy on MedQA. Source: @nori2023medprompt.](../figures/medprompt.png)
+:::
+
+More sophisticated approaches build on this basic idea by adding structure to how samples are generated, filtered, and combined. Nori et al. [@nori2023medprompt] showed that generalist models with no medical fine-tuning could outperform specialist medical models when using these methods demonstrating that intelligent orchestration of parallel samples can extract substantially more from a model than naive repeated sampling alone. Samadi et al. [@samadi2025ioi] scaled test-time compute to achieve IOI gold-medal performance with open-weight models. Their framework generates a large pool of candidate solutions, clusters them by behavioural similarity, ranks the clusters, and submits solutions via a round-robin strategy---performance scaling consistently with available compute. These results suggest that the ceiling for parallel inference-time scaling is far higher than simple pass@$k$ curves might imply, provided the selection and aggregation mechanisms are sufficiently sophisticated.
+
+
+A key breakthrough in inference-time scaling is the use of reinforcement learning to train models to reason. DeepSeek-R1 [@deepseekr1] demonstrated that reasoning capabilities can emerge purely from RL, without supervised fine-tuning on reasoning traces. Using Group Relative Policy Optimization (GRPO), the model learns to decompose problems, verify intermediate steps, and explore alternative solution paths---all from a simple reward signal. A striking side effect of this training is that the model spontaneously learns to think longer on harder problems: as RL training progresses, average response length increases steadily (see margin figure), indicating the model is learning to allocate more inference-time compute where it is needed.
+
+::: {.column-margin}
+![During RL training with GRPO, DeepSeek-R1-Zero's average response length increases steadily---the model learns to "think longer" without being explicitly told to. Source: @deepseekr1.](../figures/r1-training.png)
+:::
+
+Muennighoff et al. [@muennighoff2025s1] showed this relationship explicitly with s1, a simple test-time scaling approach that controls inference-time compute through a "budget forcing" mechanism adjusting the length of the model's chain of thought. As shown in @fig-s1-scaling, accuracy scales consistently with thinking time across mathematical and scientific reasoning benchmarks. The key insight is that allowing models to generate extended chains of reasoning---sometimes thousands of tokens of intermediate "thinking"---can solve problems that are beyond the reach of direct generation.
+
+![Test-time scaling with s1: accuracy increases with average thinking time (tokens) across mathematical problem solving (MATH500), competition mathematics (AIME24), and PhD-level science questions (GPQA Diamond). Source: @muennighoff2025s1.](../figures/s1-scaling.png){#fig-s1-scaling}
+
+This scaling relationship extends beyond pure reasoning to agentic tasks. In a paper that I hope to release this week ([code](https://github.com/UKGovernmentBEIS/docker_sandbox_breakout)), we evaluated frontier models on container sandbox-escape challenges---tasks requiring multi-step vulnerability discovery and exploitation---and found that success rate scales log-linearly with the inference-time token budget (@fig-breakout-scaling). These results suggest that sequential inference-time scaling is a general phenomenon: whether the task is mathematical reasoning or autonomous multi-step problem solving, allowing models to "think longer" reliably improves performance. These findings motivate our inference optimisation section.
+
+
+![Inference-time scaling on agentic container-escape tasks: success rate increases log-linearly with the token budget across models and difficulty levels. The pattern holds when measured by cost (bottom row). Source: @marchand2026sandboxescape.](../figures/breakout-scaling.png){#fig-breakout-scaling}

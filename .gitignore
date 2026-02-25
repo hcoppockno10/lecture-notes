@@ -1,0 +1,15 @@
+# Quarto
+_site/
+.quarto/
+_freeze/
+**/*.quarto_ipynb
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+
+/.quarto/

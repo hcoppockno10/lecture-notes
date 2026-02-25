@@ -1,0 +1,45 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "Deep Learning<br>for the GPU Poor"
+  author: "Dr Harry Coppock"
+  date: "2026-02-25"
+  chapters:
+    - index.qmd
+    - chapters/computational-foundations.qmd
+    - chapters/scaling-laws.qmd
+    - chapters/training.qmd
+    - chapters/inference.qmd
+    - chapters/practice-questions.qmd
+    - part: "Appendices"
+      chapters:
+        - appendices/symbols.qmd
+
+bibliography: references.bib
+reference-section-title: References
+csl: https://www.zotero.org/styles/ieee
+
+format:
+  html:
+    theme:
+      - cosmo
+      - custom.scss
+    reference-location: margin
+    citation-location: document
+    grid:
+      body-width: 700px
+      margin-width: 350px
+      sidebar-width: 250px
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    number-depth: 3
+    crossrefs-hover: false
+    code-tools: false
+    code-copy: false
+    code-annotations: hover
+    highlight-style: github
+    include-in-header:
+      - mathjax-macros.html
