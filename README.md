@@ -30,9 +30,10 @@ mathjax-macros.html               # Custom math macros (\R, \FLOPs, etc.)
 pyproject.toml                    # Python/uv project (quarto-cli dependency)
 index.qmd                        # Preface (landing page)
 chapters/
-  computational-foundations.qmd   # Chapter 1: Number representation, memory, FLOPs, scaling laws
-  moe-and-peft.qmd               # Chapter 2: Mixture of Experts, LoRA, QLoRA
-  precision-caching-inference.qmd # Chapter 3: Mixed precision, KV caching, MLA
+  computational-foundations.qmd   # Chapter 1: Number representation, memory, FLOPs
+  scaling-laws.qmd                # Chapter 2: Scaling laws
+  training.qmd                    # Chapter 3: Training (MoE, LoRA, QLoRA)
+  inference.qmd                   # Chapter 4: Inference
   practice-questions.qmd          # Practice exam questions
 appendices/
   symbols.qmd                    # List of symbols
@@ -43,19 +44,3 @@ references.bib                   # Bibliography
   publish.yml                    # Quarto -> GitHub Pages
 ```
 
-## Theorem environments
-
-| Environment | Quarto syntax | Colour |
-|---|---|---|
-| Definition | `::: {#def-name}` | Green |
-| Theorem | `::: {#thm-name}` | Red |
-| Lemma | `::: {#lem-name}` | Red |
-| Corollary | `::: {#cor-name}` | Red |
-| Proposition | `::: {#prp-name}` | Red |
-| Example | `::: {#exm-name}` | Blue |
-| Remark / Note | `.callout-note appearance="simple"` | Blue line |
-| Exam question | `.callout-caution` | Grey |
-
-## Credits
-
-Template structure inspired by [Gilles Castel](https://castel.dev)'s lecture notes setup and the Tufte-LaTeX project.
