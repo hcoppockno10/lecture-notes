@@ -10,10 +10,10 @@ The notes are organised around four questions:
 1. **How expensive is it?** [Chapter 1](chapters/computational-foundations.qmd) develops the skills to calculate the memory requirements and FLOPs for different model architectures and training/inference regimes. This is the foundation for understanding the methods introduced in later chapters, allowing the reader to trade off different approaches.
 2. **Why do models keep getting bigger?** [Chapter 2](chapters/scaling-laws.qmd) explores the empirical scaling laws that govern the relationship between compute, data, and performance, as well as the emerging paradigm of inference-time scaling.
 3. **How do we make training tractable?** [Chapter 3](chapters/training.qmd) covers mixed-precision training, gradient accumulation and checkpointing, mixture of experts (scaling capacity without scaling compute), and parameter-efficient fine-tuning via LoRA and QLoRA.
-4. **How do we make inference efficient?** [Chapter 4](chapters/inference.qmd) addresses KV caching, prefill--decode disaggregation, and Multi-Head Latent Attention.
+4. **How do we make inference efficient?** [Chapter 4](chapters/inference.qmd) addresses KV caching, prefill--decode disaggregation, Multi-Head Latent Attention and speculative decoding.
 
 **Errata.**
-I am sure there are bugs in here. If you find one, please let me know and I will patch ([harry.coppock@imperial.ac.uk](mailto:harry.coppock@imperial.ac.uk)).
+I am sure there are bugs in here. If you find one, please let me know and I will patch ([harry.coppock@imperial.ac.uk](mailto:harry.coppock@imperial.ac.uk)) or raise a PR!
 
 ## Prerequisites {.unnumbered}
 

@@ -1,6 +1,6 @@
 # Computational Foundations {#sec-foundations}
 
-Modern deep learning is defined by scale. The largest language models contain over a trillion parameters, require terabytes of memory, and demand petaFLOP-days of compute to train. Before exploring techniques to make this scale accessible to researchers with limited resources (you), we must first develop tools for reasoning about the computational requirements of these models.
+Modern deep learning is defined by scale. The largest language models contain over a trillion parameters, require terabytes of memory, and demand thousands of petaFLOP compute days to train. Before exploring techniques to make this scale accessible to researchers and engineers with limited resources (you), we must first develop tools for reasoning about the computational requirements of these models.
 
 ::: {.column-margin}
 ![A fruit fly has roughly 50 million synapses; the human brain has approximately 100 trillion. It remains unknown to what extent a synapse is comparable to a parameter but it is fascinating to consider that frontier models now number over 1 trillion parameters. [flywire.ai](https://flywire.ai/)](../figures/fruit-fly.png){#fig-fruit-fly}
@@ -19,6 +19,7 @@ A **bit** is a single binary digit taking the value 0 or 1. A **byte** is a stri
 ::: {.column-margin}
 ![INT8 representation: the top line shows continuous data points; the bottom line shows the 256 evenly spaced values available in INT8. Each continuous value must be mapped (quantised) to the nearest representable integer.](../figures/int8-representation.svg){#fig-int8-representation}
 :::
+
 
 Integer representations are simple and memory-efficient---each INT8 value occupies exactly one byte---but they cannot represent fractional values or numbers outside a narrow range. We would struggle to do deep learning with this data type. This motivates the use of floating-point systems.
 
@@ -64,6 +65,17 @@ E &= (b_{30} b_{29} \dots b_{23})_2 = \sum_{i=0}^{7} b_{23+i} \, 2^{i} = 124 \in
 $$
 :::
 
+
+::: {.column-margin}
+**Hidden nonlinearities in "linear" nets (and why ES can exploit them).**
+OpenAI's *Nonlinear computation in deep linear networks* [@openai2017nonlinear] highlights a near-zero effect: in float32, very small values can underflow (and with denormals effectively flushed to zero) so the computation has a deadzone / discontinuity around 0. Standard autodiff/backprop differentiates the ideal real-valued ops, so it doesn't provide a reliable gradient signal to intentionally steer activations into (or exploit) these numerical discontinuities, whereas Evolution Strategies can, because it doesn't rely on smooth derivatives.
+
+![Near-zero underflow in float32: the deadzone around 0 where values flush to zero, creating an implicit discontinuity.](../figures/near-zero.png)
+
+EGGROLL [@sarkar2025evolutionstrategieshyperscale] is the complementary tanh-like case: the "activation" comes from the datatype itself, int8 casting and saturated/clipped addition produce a hard-tanh / hard-sigmoid-like saturation at the extremes. Again, this is awkward for vanilla backprop (discrete steps / zero gradients in saturation), but evolutionary optimisation can directly search for parameter settings that benefit from the hardware nonlinearity.
+:::
+
+
 ## Memory for Inference {#sec-memory-inference}
 
 The minimum memory required to run a model at inference time is determined by the number of parameters and the precision at which they are stored.
@@ -75,6 +87,7 @@ M_{\text{inference}} = P \times \frac{B}{8} \quad \text{bytes}.
 $$ {#eq-inference-memory}
 
 This formula assumes negligible memory requirements from tokens/represents so batch size 1, a short sequence/context length, and no key--value cache (which we will address in @sec-inference).
+
 
 ::: {#exm-llama-inference}
 ## LLaMA-65B at FP32
