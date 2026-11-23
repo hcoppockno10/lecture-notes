@@ -169,3 +169,13 @@ class LoRALayer(nn.Module):
 **(e)** Consider the compute efficiency of LoRA compared to full fine-tuning. For a weight matrix $W \in \mathbb{R}^{N \times N}$ with LoRA matrices $A \in \mathbb{R}^{r \times N}$ and $B \in \mathbb{R}^{N \times r}$ where $r \ll N$. Derive the total FLOPs for LoRA and show that this approaches $\frac{2}{3}$ of the full fine-tuning cost when $r \ll N$. [2 marks]{.exam-marks}
 
 :::
+
+## Putting It Into Practice {.unnumbered}
+
+::: {.callout-tip}
+## Coming on Friday: A Pretraining Efficiency Competition
+
+On Friday there will be an opportunity to put what you have learnt into practice in a **pretraining efficiency competition**. The same estimation skills you use in these questions (counting FLOPs and memory, choosing number formats, and reasoning about how to spend a fixed compute budget) will be your main tools.
+
+*Full details, rules and setup instructions will be posted here before the session.*
+:::
