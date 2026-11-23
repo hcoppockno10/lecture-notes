@@ -34,7 +34,7 @@ The KV cache can also be **shared across requests**. When multiple requests shar
 ::: {.callout-tip collapse="true"}
 ## In the Codebase: [microGPT](https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95) — KV Cache
 
-*microGPT is not an efficient transformer implementation, it is an exercise in implementing one in as few lines of Python as possible.* In `gpt/gpt.py`, the cache is just a pair of Python lists, one per layer, that grow as tokens are generated. The `gpt()` function takes these lists as arguments and appends each new token's key and value:
+In `gpt/gpt.py`, the cache is just a pair of Python lists, one per layer, that grow as tokens are generated. The `gpt()` function takes these lists as arguments and appends each new token's key and value:
 
 ```python
 def gpt(token_id, pos_id, keys, values):
@@ -169,3 +169,5 @@ $$ {#eq-spec-throughput}
 When the draft model closely approximates the target ($\alpha$ is high), most tokens are accepted and the effective throughput multiplies. For example, with $\alpha = 0.8$ and $\gamma = 5$, the expected yield is $\approx 4.0$ tokens per cycle, a significant reduction in the number of expensive target-model forward passes. In practice, speculative decoding typically achieves $2$--$3\times$ latency reduction depending on how well the draft model matches the target model's distribution on the given input.
 
 Setting a large draft length $\gamma$ is only beneficial when the acceptance rate $\alpha$ is high. When $\alpha$ is low, most draft tokens are rejected early and the remaining drafts are discarded. In the worst case ($\alpha \to 0$), every cycle produces just one token but $\gamma$ draft tokens are still produced and verified. This can make speculative decoding *slower* than standard autoregressive decoding. In practice, $\gamma$ should be tuned to the expected acceptance rate: a poor draft model warrants a short draft length.
+
+[**No separate draft model.** Instead of a separate small model, the draft can come from the target model itself. Nemotron 3 Super [@nvidia2026nemotron3super] is trained with *multi-token prediction* (MTP) heads that share weights across prediction offsets, so one head can be applied recursively at inference to draft longer sequences. With a draft length of 7 it averages ${\sim}3.45$ accepted tokens per verification step, for minimal extra FLOPs and no extra model to hold in memory.]{.column-margin}

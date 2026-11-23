@@ -1,7 +1,7 @@
 # Training Optimisation {#sec-training}
 
 The previous chapters established the computational and memory costs of training large models, and the scaling laws that big labs are all chasing.
-This chapter introduces techniques that make training at scale tractable: *mixed-precision training*, which reduces memory and increases throughput; *gradient accumulation and checkpointing*, which enable training with limited GPU memory; *Mixture of Experts* (MoE), which scales model capacity without proportionally scaling compute; and *parameter-efficient fine-tuning* methods (LoRA and QLoRA), which adapt large pre-trained models using a fraction of the parameters and memory.
+This chapter introduces techniques that make training at scale tractable.
 
 ## Gradient Accumulation {#sec-grad-accum}
 
@@ -17,7 +17,7 @@ Gradient accumulation is a technique that simulates a large batch size using lim
 
 The effective batch size is $b_{\text{eff}} = s \times b_{\text{micro}}$.
 
-Gradient accumulation trades compute time for memory: each micro-batch requires only enough memory for $b_{\text{micro}}$ samples, but $s$ sequential forward--backward passes are needed per parameter update. The resulting gradient is mathematically identical to training with batch size $b_{\text{eff}}$.
+Gradient accumulation trades compute time for memory: each micro-batch requires only enough memory for $b_{\text{micro}}$ samples, but $s$ sequential forward--backward passes are needed per parameter update. The resulting gradient is mathematically identical to training with batch size $b_{\text{eff}}$ (up to floating-point rounding). Why might this not be the case for a model that uses BatchNorm?
 
 ::: {.callout-tip collapse="true"}
 ## In the Codebase: [nanochat](https://github.com/karpathy/nanochat/blob/master/scripts/base_train.py) — Gradient Accumulation
@@ -55,7 +55,7 @@ The key insight is a tradeoff between memory and compute. Consider a model with 
 
 ::: {#exm-deepseek-checkpointing}
 ## DeepSeek Gradient Checkpointing
-DeepSeek-V3 [@deepseekv3] employs a sophisticated activation compression strategy that goes beyond standard checkpointing. Rather than storing full-precision activations at checkpoint boundaries, they compress the stored activations through quantising (@exm-deepseek-fp8) and project some representations to a lower dimensional space (@def-mla).
+DeepSeek-V3 [@deepseekv3] employs a sophisticated activation compression strategy that goes beyond standard checkpointing. Rather than storing full-precision activations at checkpoint boundaries, they compress the stored activations through quantising (@exm-deepseek-fp8) and project some representations to a lower dimensional space (@sec-mla).
 :::
 
 ## Mixed-Precision Training {#sec-mixed-precision}
@@ -64,13 +64,15 @@ Mixed-precision training uses different numerical formats for different parts of
 
 **BF16** (BrainFloat16) is a 16-bit floating-point format with 1 sign bit, 8 exponent bits, and 7 fraction bits. It was developed at Google Brain specifically for deep learning and first implemented in Google's TPU hardware. The design of BF16 reflects a key *empirical* insight: deep learning models are more sensitive to the *range* of representable values (determined by the exponent) than to *precision* (determined by the fraction). By keeping the same 8-bit exponent as FP32, BF16 can represent the same range of magnitudes ($\sim 10^{-38}$ to $\sim 10^{38}$), avoiding the underflow and overflow issues that plague FP16 (which has only a 5-bit exponent).
 
+[**Why FP32 for the update and for accumulation?** Both add a small number to a much larger one. BF16 keeps only 8 significant bits, so near a value $w$ its spacing is $\approx w \cdot 2^{-7}$, and any increment smaller than half of that rounds away. A weight update of $10^{-4}$ to a weight of $1$ vanishes entirely in BF16, but survives in FP32 (spacing $2^{-23}$); over thousands of steps, these lost updates stall training. The same happens inside a matmul: each output element is a sum of $K$ products ($K$ in the thousands), and once the running sum is large, further small products are swamped. Hardware therefore multiplies in BF16 (or FP8) but accumulates in FP32.]{.column-margin}
+
 Mixed-precision training stores the model weights, gradients, and intermediate computations in BF16 (2 bytes each), but maintains a *master copy* of the weights in FP32 (4 bytes) for the optimiser update. The total memory per parameter is therefore:
 $$
 \underbrace{2P}_{\text{BF16 weights}} + \underbrace{2P}_{\text{BF16 gradients}} + \underbrace{4P}_{\text{FP32 master}} + \underbrace{8P}_{\text{Adam states}} = 16P \;\text{bytes},
 $$
 compared to $16P$ bytes for pure FP32 training ($4P$ weights + $4P$ gradients + $8P$ Adam). The savings come primarily from activations and communication: intermediate activations are stored in BF16 (halving activation memory), and data transferred between GPUs during distributed training is halved. Note that for small batch sizes, the FP32 master copy can *increase* total memory, since we store both BF16 and FP32 copies of the weights; the savings become significant only when activation memory dominates.
 
-[Compute cost is dominated by the significand (fraction) multiply, whose area/energy scales roughly quadratically with the number of fraction bits, while exponent handling is comparatively small; hence BF16 is typically no more expensive than FP16 (and can even be cheaper).]{.column-margin}
+[Compute cost is dominated by the significand (fraction) multiply, whose area/energy scales roughly quadratically with the significand width (11 bits for FP16 vs 8 for BF16), while exponent handling is comparatively small. A BF16 multiplier is therefore about half the silicon of an FP16 one, and roughly eight times smaller than an FP32 one [@google2019bfloat16]. Cheaper to *build* does not mean faster on a given chip, though: GPUs such as the A100 and H100 run FP16 and BF16 through the same tensor cores at identical throughput. Google's TPUs take the other route, building their matrix units around BF16 multiplies (with FP32 accumulation) to fit more multipliers per unit of silicon and power.]{.column-margin}
 
 :::: {#exm-deepseek-fp8}
 ## DeepSeek FP8 Training Strategy
@@ -81,11 +83,25 @@ The FP8 format used is **E4M3**: 1 sign bit, 4 exponent bits, and 3 mantissa bit
 ![DeepSeek-V3's mixed-precision framework for linear layers: forward activations and weights are dynamically quantised to FP8 (E4M3) for the GEMM, while the master weights and optimiser states remain in higher precision. Source: @deepseekv3.](../figures/fp8.png){#fig-fp8}
 
 DeepSeek's approach to making FP8 training work involves several key principles:
-**Selective precision.** Not all operations are performed in FP8. Only the high-compute operations---primarily large matrix multiplications (GEMM operations in the MLP and attention layers)---use FP8. Low-compute operations such as layer normalisation, residual additions, softmax, and the router remain in BF16 or FP32.
+**Selective precision.** Not all operations are performed in FP8. Only the high-compute operations---primarily large matrix multiplications (GEMM operations in the MLP and attention layers)---use FP8. Low-compute operations such as layer normalisation, residual additions, softmax, and the router remain in BF16 or FP32. Operations involving exponentials and long sums (softmax, normalisation) are especially sensitive: $e^x$ quickly exceeds a narrow format's range (in E4M3 it overflows for $x > \ln 448 \approx 6.1$, in FP16 for $x > \ln 65504 \approx 11.1$), and accumulating many terms loses precision. Keeping these in BF16/FP32 avoids both.
 The rationale is straightforward: low-compute operations contribute negligibly to total runtime, so keeping them in higher precision costs almost nothing in speed but avoids introducing quantisation error in numerically sensitive computations. The router, in particular, must remain in high precision because small errors in routing scores can cascade into completely different expert assignments.
-**Fine-grained tile-wise quantisation.** Rather than quantising an entire weight matrix with a single scaling factor (which would be sensitive to outliers, as discussed in @sec-qlora), DeepSeek divides matrices into small tiles and quantises each tile independently with its own scaling factor. This is the same principle as block-wise quantisation in QLoRA, but applied at the level of matrix tiles during forward computation.
+**Fine-grained tile-wise quantisation.** Rather than quantising an entire weight matrix with a single scaling factor (which would be sensitive to outliers, as discussed in @sec-qlora), DeepSeek divides matrices into small tiles and quantises each tile independently with its own scaling factor. This is the same principle as [block-wise quantisation in QLoRA](#block-quant), discussed in more detail below, but applied at the level of matrix tiles during forward computation.
 **Thorough small-scale experimentation.** Before committing to FP8 for the full training run, DeepSeek conducted extensive experiments at smaller scales to validate that FP8 training converges to the same loss as BF16 training---a practical application of the scaling laws from @sec-scaling-laws.
-The DeepSeek-V3 precision strategy.
+:::::
+
+[Don't confuse NVFP4 with **NF4** from QLoRA (@sec-qlora). NF4 is a *storage* format for frozen weights, built from normal-distribution quantiles, that is dequantised to BF16 before every matmul. NVFP4 is a *compute* format: Blackwell GPUs run the GEMMs directly on the 4-bit values, for weights, activations *and* gradients.]{.column-margin}
+
+::::: {#exm-nemotron-nvfp4}
+## Nemotron 3 Super: Pre-training in 4-bit (NVFP4)
+
+NVIDIA's Nemotron 3 Super [@nvidia2026nemotron3super] (120B total / 12B active parameters, hybrid Mamba--Attention MoE) pushes the DeepSeek recipe a step further. It was pre-trained with the forward (fprop), input-gradient (dgrad) and weight-gradient (wgrad) GEMMs of most linear layers in **NVFP4**: a 4-bit E2M1 element format with 16-element micro-blocks, an E4M3 (FP8) scale per micro-block, and a second-level FP32 global scale per tensor.
+
+The same principles as DeepSeek reappear:
+
+- **Selective precision.** The final 15% of the network, the attention QKV and output projections, the multi-token-prediction layers and the embeddings all stay in BF16. The Mamba output projection uses MXFP8 because it underflowed badly in NVFP4 in smaller-scale runs.
+- **Fine-grained scaling.** 16-element blocks keep one outlier from destroying the precision of a whole tensor. Weights use 2D blocks so the quantised weights are consistent between the forward and backward pass. Gradients and activations use 1D blocks along the GEMM reduction axis.
+
+**Underflow in practice.** By the end of pre-training, the number of exactly-zero weight-gradient elements reached 7% of the total parameter count, and in ablations on the smaller Nemotron 3 Nano, NVFP4 produced about $3\times$ more zero gradients than BF16, since it underflows tiny gradients to zero (see @sec-number-representation). Yet promoting all tensors to MXFP8 for the last stretch of training improved the training loss but gave **no gain in downstream accuracy**, so the final model was trained in NVFP4 for the whole run. The lesson: precision is guided by what you find empirically is okay, not by what looks numerically tidy.
 :::::
 
 ::: {.callout-tip collapse="true"}
@@ -203,21 +219,31 @@ a 25% saving over $16P$ (the AdamW-managed embeddings and LM head still keep bot
 
 ## Mixture of Experts {#sec-moe}
 
-For a standard transformer, roughly two thirds of the parameters in a network reside in the feed-forward (MLP) layers and each MLP matrix is applied independently to each token/representation. Mixture of Experts architectures deviate from this by routing each token to a subset of specialised sub-networks. This results in each token seeing far fewer parameters than than the full model, allowing the total number of parameters to grow much larger than the compute budget would normally allow.
+For a standard transformer, roughly two thirds of the parameters in a network reside in the feed-forward (MLP) layers and each MLP matrix is applied independently to each token/representation. Mixture of Experts architectures deviate from this by routing each token to a subset of specialised sub-networks. This results in each token seeing far fewer parameters than the full model, allowing the total number of parameters to grow much larger than the compute budget would normally allow.
 
 Mixture of Experts (MoE) layer [@shazeer2017outrageously] replaces the single feed-forward network in a transformer layer with $N_e$ parallel expert networks $\{\mathrm{FFN}_1, \ldots, \mathrm{FFN}_{N_e}\}$ and a router network that determines which experts process each token.
 
-The router is a lightweight network (typically a single linear layer followed by a softmax) that produces a probability distribution over experts for each input token $\mathbf{x}$:
+The router is a lightweight network (typically a single linear layer followed by a gating function) that produces an affinity score for each expert for each input token $\mathbf{x}$. Following DeepSeek-V3 [@deepseekv3], we use a sigmoid gate:
 
 $$
-g_i(\mathbf{x}) = \sigma(\mathbf{x}^\top \mathbf{e}_i), \quad i = 1, \ldots, N_e
+s_i(\mathbf{x}) = \sigma(\mathbf{x}^\top \mathbf{e}_i), \quad i = 1, \ldots, N_e
 $$ {#eq-gating}
 
-where $\mathbf{e}_i$ is the learned embedding for expert $i$. In top-$K$ gating, only the $K$ experts with the highest affinity scores are activated:
+where $\mathbf{e}_i$ is the learned embedding for expert $i$. In top-$K$ gating, only the $K$ experts with the highest affinity scores are activated, and their scores are renormalised so that the gating weights of the selected experts sum to 1:
+
+$$
+g_i(\mathbf{x}) = \begin{cases} \dfrac{s_i(\mathbf{x})}{\sum_{j \in \text{top-}K} s_j(\mathbf{x})} & i \in \text{top-}K, \\[1ex] 0 & \text{otherwise}, \end{cases}
+$$ {#eq-gating-norm}
 
 $$
 \mathbf{y} = \sum_{i \in \text{top-}K} g_i(\mathbf{x}) \cdot \mathrm{FFN}_i(\mathbf{x}).
 $$ {#eq-moe-output}
+
+::: {.callout-note appearance="simple"}
+## Why sigmoid and not softmax?
+
+Earlier MoE models (e.g. Shazeer et al. [@shazeer2017outrageously], Mixtral, and still gpt-oss) take a softmax over the experts, typically applied only to the top-$K$ logits (i.e. setting the rest to $-\infty$). Both approaches give weights over the selected experts that sum to 1. The difference is that a softmax makes experts *compete*: for a token's affinity to expert A to go up, its affinity to the others must go down. With a sigmoid each expert's affinity is assessed independently, which seems to be better behaved when scaling to many experts (DeepSeek-V3 uses 256) and interacts more simply with bias-based load balancing (below), since each score can be shifted without affecting the others. The renormalisation step (@eq-gating-norm) adds negligible compute.
+:::
 
 The output is a weighted combination of only the $K$ active expert outputs. The affinity scores can be interpreted as a soft routing decision, allowing the model to learn which experts are best suited for different types of inputs. The key advantage of MoE is the decoupling of total parameters from active parameters, allowing much greater model capacity without a proportional increase in compute.
 
@@ -235,7 +261,7 @@ Several mitigation strategies have been proposed:
 ## DeepSeek-V3 MoE Configuration
 
 ![DeepSeek-V3 MoE architecture.](../figures/moe.png){#fig-moe}
-DeepSeek-V3 [@deepseekv3] adapted the standard MoE architecture with $N_e = 256$ routed experts, significantly more than what was seen previously (Mistral models tended to have $N_e = 8$), and introduced the concept of a shared expert. Each token activates the top-$K = 8$ of 256 experts, giving a total of 671B parameters but only $\sim$37B activated per token.
+DeepSeek-V3 [@deepseekv3] adapted the standard MoE architecture with $N_e = 256$ routed experts, significantly more than what was seen previously (Mistral models tended to have $N_e = 8$), and introduced the concept of a shared expert. Each token activates the top-$K = 8$ of 256 experts, giving a total of 671B parameters but only ${\sim}37$B activated per token.
 
 **Node-limited routing.** Experts are often distributed across multiple GPU nodes, each hosting a subset of experts. When a token is routed to an expert on a different node, it must be sent across the inter-node network, making communication a key bottleneck. To address this, DeepSeek-V3 constrains each token to be sent to at most $M = 4$ compute nodes, where the top $K/M = 2$ experts per node are selected by the sum of their affinity scores. This reduces inter-node communication overhead by constraining the communication pattern while preserving expert diversity.
 
@@ -317,6 +343,8 @@ $$
 \mathbf{h} = W_0 \mathbf{x} + \frac{\alpha}{r} L_2 L_1 \mathbf{x},
 $$ {#eq-lora}
 
+[**Notation.** Here, following the LoRA paper [@hu2021lora], $\mathbf{x}$ is a column vector, i.e. samples are columns. With the samples-as-rows convention used for FLOP counting in @sec-flops this becomes $\mathbf{H} = \mathbf{X}W_0^{\top} + \frac{\alpha}{r}\mathbf{X}L_1^{\top}L_2^{\top}$, which is exactly what PyTorch's `nn.Linear` computes (it stores weights as (out, in) and applies $\mathbf{X}W^{\top}$). The parameter and FLOP counts are the same either way.]{.column-margin}
+
 where $L_2 \in \R^{d \times r}$ and $L_1 \in \R^{r \times k}$ with rank $r \ll \min(d, k)$. Only $L_1$ and $L_2$ are trained; $W_0$ remains frozen. The scalar $\alpha / r$ controls the magnitude of the low-rank update relative to $W_0$. Crucially, $L_2$ is initialised to zero (and $L_1$ to a random Gaussian) so that $\Delta W = L_2 L_1 = 0$ at the start of training, this preserves the pre-trained model's behaviour at step 0 and ensures stable training.
 
 
@@ -352,7 +380,7 @@ $$
 
 :::
 
-LoRA has several nice properties. At inference time, the LoRA matrices can be merged: $W = W_0 + L_2 L_1$. The resulting model has exactly the same architecture and computational cost as the original. This also enables adapter swapping, where different LoRA adapters (for different tasks or users) can be dynamically loaded and merged with the same base model.
+LoRA has several nice properties. At inference time, the LoRA matrices can be merged: $W = W_0 + L_2 L_1$. The resulting model has exactly the same architecture and computational cost as the original. Note that this is only true at *inference*. During fine-tuning $W_0$ is frozen while $L_1, L_2$ are being updated, so the adapters cannot be merged: every forward pass computes $W_0\mathbf{x}$ *and* $L_2(L_1\mathbf{x})$, so a LoRA forward pass costs slightly *more* FLOPs than the original model (an extra $\sim 2r(d+k)$ per token per adapted layer, small since $r \ll d, k$). The large savings during training come from the backward pass and optimiser, not the forward pass. This also enables adapter swapping, where different LoRA adapters (for different tasks or users) can be dynamically loaded and merged with the same base model.
 
 
 ::: {.callout-note appearance="simple"}
@@ -387,6 +415,7 @@ class LoRALinear(nn.Module):
         self.lora_l1 = nn.Linear(base.in_features, r, bias=False)           # <2>
         self.lora_l2 = nn.Linear(r, base.out_features, bias=False)          # <2>
         self.scale = alpha / r                                              # <3>
+        nn.init.zeros_(self.lora_l2.weight)                                 # <5>
 
     def forward(self, x):
         return self.base(x) + self.scale * self.lora_l2(self.lora_l1(x))   # <4>
@@ -396,6 +425,7 @@ class LoRALinear(nn.Module):
 2. Low-rank matrices $L_1 \in \mathbb{R}^{r \times k}$ and $L_2 \in \mathbb{R}^{d \times r}$.
 3. Scaling factor $\alpha / r$.
 4. Implements @eq-lora: base output plus scaled low-rank update.
+5. $L_2$ initialised to zero so that $\Delta W = 0$ at step 0 (`nn.Linear` would otherwise initialise it randomly); $L_1$ keeps `nn.Linear`'s default random (Kaiming-uniform) initialisation.
 
 Every `nn.Linear` in the model is swapped for a `LoRALinear`, then base parameters are frozen:
 
@@ -431,7 +461,7 @@ where $\lfloor \cdot \rceil$ denotes rounding to the nearest level, $b$ is the n
 
 The immediate problem is *outliers*: a single extreme value inflates $\max|\mathbf{x}|$, spreading the 16 available bins across a much wider range than necessary (@fig-block-quant). Most weights cluster near zero, so the majority of bins end up assigned to regions where almost no values lie.
 
-**Block-wise quantisation** mitigates the outlier problem by dividing the weight tensor into contiguous blocks of $B$ elements (typically $B = 64$) and quantising each block independently with its own absmax scaling factor, stored in higher precision. An outlier in one block only affects that block's bin placement, leaving the remaining blocks unharmed.
+[]{#block-quant}**Block-wise quantisation** mitigates the outlier problem by dividing the weight tensor into contiguous blocks of $B$ elements (typically $B = 64$) and quantising each block independently with its own absmax scaling factor, stored in higher precision. An outlier in one block only affects that block's bin placement, leaving the remaining blocks unharmed.
 
 [Block-wise overhead: 1 FP32 constant per 64 parameters = 32/64 = 0.5 bits per parameter. After double quantisation: 8/64 = 0.125 bits for the FP8 constants, plus 32/(256 $\times$ 64) $\approx$ 0.002 bits for the second-level FP32 constant $\approx$ 0.127 bits total.]{.column-margin}
 

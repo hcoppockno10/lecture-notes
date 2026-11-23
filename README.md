@@ -1,6 +1,6 @@
 # Deep Learning at Scale for the GPU Poor
 
-Lecture notes for COMP70010 at Imperial College London, by Dr Harry Coppock.
+Lecture notes for COMP60038/70113 at Imperial College London, by Dr Harry Coppock.
 
 ## Quick start
 

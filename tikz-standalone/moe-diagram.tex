@@ -42,6 +42,10 @@
     \draw[thick_arrow] (w2) -- (combine);
     \draw[thick_arrow] (wn) -- (combine);
     \draw[thick_arrow] (combine) -- (output);
+    % Gating weights from router to weighting nodes (REVIEW: added after forum #501)
+    \draw[-stealth, thick, dashed, draw=orange!90!black, rounded corners=4pt] (router.north) -- (2.5,3.6) -- (6.85,3.6) -- (6.85,2.85);
+    \draw[-stealth, thick, dashed, draw=orange!90!black, rounded corners=4pt] (3.5,-0.25) -- (6.85,-0.25) -- (6.85,0.45);
+    \draw[-stealth, thick, dashed, draw=orange!90!black, rounded corners=4pt] (router.south) -- (2.5,-3.2) -- (6.85,-3.2) -- (6.85,-2.35);
     % Skip connection
     \draw[skip_arrow] (input) to[out=30, in=150] (output);
 \end{tikzpicture}

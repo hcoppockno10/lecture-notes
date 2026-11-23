@@ -8,6 +8,7 @@ Modern deep learning is defined by scale. The largest language models contain ov
 
 This chapter develops the fundamental arithmetic of deep learning: how numbers are represented in hardware, how much memory a model consumes during inference and training, and how many floating-point operations each forward and backward pass requires.
 
+
 ## Number Representation {#sec-number-representation}
 
 All computation on modern hardware operates on finite representations of numbers. Understanding these representations is essential for reasoning about memory consumption, numerical precision, and the tradeoffs that arise when training at reduced precision.
@@ -36,7 +37,7 @@ A **floating-point number** consists of three components (the term "floating poi
 :::
 
 ::: {.column-margin}
-When the exponent field is all zeros, the number is called **subnormal** (or denormalised). Subnormal numbers fill the gap between zero and the smallest normal floating-point value, providing *gradual underflow* instead of an abrupt jump to zero. However, GPU hardware typically flushes subnormals to zero in reduced-precision formats (FP16, BF16), so the exponent range remains the primary defence against underflow in practice. See [Wikipedia: Subnormal number](https://en.wikipedia.org/wiki/Subnormal_number).
+When the exponent bits are all zero and the fraction is nonzero, the value is called **subnormal** (or denormalised). Subnormal values let us represent numbers closer to zero than the smallest positive normal value, with progressively fewer significant bits. This is called *gradual underflow*. Some GPU instructions preserve subnormal values, while others treat subnormal inputs or results as zero (flush to zero). For example, a gradient of $2^{-20}$ is subnormal in FP16 and may be flushed to zero. See [Wikipedia: Subnormal number](https://en.wikipedia.org/wiki/Subnormal_number).
 :::
 
 ::: {.callout-tip appearance="simple"}
@@ -72,7 +73,7 @@ OpenAI's *Nonlinear computation in deep linear networks* [@openai2017nonlinear] 
 
 ![Near-zero underflow in float32: the deadzone around 0 where values flush to zero, creating an implicit discontinuity.](../figures/near-zero.png)
 
-EGGROLL [@sarkar2025evolutionstrategieshyperscale] is the complementary tanh-like case: the "activation" comes from the datatype itself, int8 casting and saturated/clipped addition produce a hard-tanh / hard-sigmoid-like saturation at the extremes. Again, this is awkward for vanilla backprop (discrete steps / zero gradients in saturation), but evolutionary optimisation can directly search for parameter settings that benefit from the hardware nonlinearity.
+EGGROLL [@sarkar2025evolutionstrategieshyperscale] uses this discontinuity in the data type as the activation for the network, int8 casting and saturated/clipped addition produce a hard-tanh / hard-sigmoid-like saturation at the extremes. Again, this is awkward for vanilla backprop (discrete steps / zero gradients in saturation), but evolutionary optimisation can directly search for parameter settings that benefit from the hardware nonlinearity.
 :::
 
 
@@ -92,7 +93,7 @@ This formula assumes negligible memory requirements from tokens/represents so ba
 ::: {#exm-llama-inference}
 ## LLaMA-65B at FP32
 
-For LLaMA-65B [@grattafiori2024llama3herdmodels] stored in FP32:
+For LLaMA-65B [@touvron2023llama] stored in FP32:
 $$
 M_{\text{inference}} = 65 \times 10^9 \times \frac{32}{8} = 260 \;\text{GB}.
 $$
@@ -112,7 +113,7 @@ M_{\text{weights}} = P \times \frac{B}{8} \quad \text{bytes}.
 $$
 
 **Gradients.**
-For every parameter, we need to store how much it should be adjusted---its gradient with respect to the loss. The gradient tensor has the same shape and precision as the parameter tensor:
+For every parameter, we need to store how much it should be adjusted. The gradient tensor has the same shape and precision as the parameter tensor:
 
 ::: {.column-margin}
 During backpropagation, we compute $\frac{\partial \mathcal{L}}{\partial w}$ for every trainable parameter $w$. These gradients must all be stored simultaneously because the optimiser updates all parameters together after the backward pass completes.
@@ -171,11 +172,11 @@ We now walk through each operation in a single transformer layer [@vaswani2017at
 **Self-attention sub-layer:**
 
 1. **Layer Norm**: stores its input $\mathbf{X}$ (needed for the normalisation backward pass) $\to$ $4bnd$ bytes.
-2. **QKV projection** ($\mathbf{Q}, \mathbf{K}, \mathbf{V} = W_Q \mathbf{X}', W_K \mathbf{X}', W_V \mathbf{X}'$): stores the layer norm output $\mathbf{X}'$ (for computing weight gradients) and the projected $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ (for the attention backward pass) $\to$ $4bnd + 3 \times 4bnd = 16bnd$ bytes.
+2. **QKV projection** ($\mathbf{Q}, \mathbf{K}, \mathbf{V} = \tilde{\mathbf{X}} W_Q, \tilde{\mathbf{X}} W_K, \tilde{\mathbf{X}} W_V$, where $\tilde{\mathbf{X}} = \operatorname{LayerNorm}(\mathbf{X})$): stores the layer norm output $\tilde{\mathbf{X}}$ (for computing weight gradients) and the projected $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ (for the attention backward pass) $\to$ $4bnd + 3 \times 4bnd = 16bnd$ bytes.
 3. **Attention scores** ($\mathbf{Q}\mathbf{K}^\top / \sqrt{d_k}$): stores the score matrix before softmax $\to$ $4bn_hn^2$ bytes.
 4. **Softmax**: stores the output probability matrix $\to$ $4bn_hn^2$ bytes.
 5. **Attention dropout**: stores the binary mask $\to$ $bn_hn^2$ bytes.
-6. **Weighted sum** ($\mathbf{A}\mathbf{V}$): stores the context vectors $\to$ $4bnd$ bytes.
+6. **Weighted sum** ($\mathbf{A}\mathbf{V}$) **and output projection** ($W_O$): the weighted sum's backward pass needs $\mathbf{A}$ and $\mathbf{V}$, which are already stored (steps 2, 4, 5). The output projection stores its input, the context vectors, for computing its weight gradient $\to$ $4bnd$ bytes.
 7. **Output dropout**: stores the binary mask $\to$ $bnd$ bytes.
 
 ::: {.column-margin}
@@ -195,6 +196,10 @@ Summing these contributions: the ten tensors stored at 4-byte precision contribu
 $$
 M_{\text{act}} = L \cdot b \cdot n \cdot \bigl(66d + 9 n_h \cdot n\bigr) \quad \text{bytes}.
 $$ {#eq-activation-memory}
+
+::: {.column-margin}
+**Can I ignore dropout?** Yes, for estimation. Above we count each mask at 1 byte per element (PyTorch stores it as a `bool` tensor). In reality you need not store the mask at all: it is just the output of a pseudo-random number generator, so keeping the generator's seed and offset (a few bytes) is enough to regenerate the identical mask in the backward pass. FlashAttention [@dao2022flashattention] does exactly this for the attention dropout mask. When estimating activation memory to within an order of magnitude, as in the exam, you can confidently leave dropout out.
+:::
 
 ::: {#exm-llama-training}
 ## LLaMA-65B Training Memory
@@ -218,7 +223,7 @@ This would require approximately 25 NVIDIA RTX 6000 GPUs (each with 48 GB), and 
 ::: {.callout-tip appearance="simple"}
 ## Looking Ahead
 
-Do not despair! There are lots of optimisation techniques which can help with this. E.g. you maybe asking why not store the dropout activation masks at 1 bit per element instead of 8 bits? Well, the rest of this series will explore techniques you can use to dramatically reduce this memory footprint.
+Do not despair! There are lots of optimisation techniques which can help with this. The rest of this series will explore techniques you can use to dramatically reduce this memory footprint.
 :::
 
 ## FLOPs and Computational Complexity {#sec-flops}
@@ -244,7 +249,7 @@ We now derive the FLOPs for one forward pass through a single transformer layer 
 
 **Self-attention sub-layer:**
 
-1. **Layer Norm**: computing the mean, variance, normalisation, scale, and shift involves several element-wise passes over the $n \times d$ input $\to \sim 20nd$ FLOPs.
+1. **Layer Norm**: computing the mean, variance, normalisation, scale, and shift involves several element-wise passes over the $n \times d$ input $\to \sim 5$--$8nd$ FLOPs.
 
 ::: {.column-margin}
 Layer norm and other element-wise operations (GeLU, residual additions) contribute $O(nd)$ FLOPs, which is negligible compared to the $O(nd^2)$ and $O(n^2d)$ terms from matrix multiplications. We include it here in the first instance but drop them from future calculations.
@@ -296,7 +301,7 @@ The factor of 6 arises from $2PD$ for the forward pass, approximately $2P$ FLOPs
 ::: {#exm-llama-flops}
 ## LLaMA-65B Forward Pass
 
-For LLaMA-65B [@hoffmann2022training] with model dimension $d = 8192$, sequence length $n = 2048$, batch size $B = 1$, $L = 80$ layers, and $n_h = 64$ attention heads, we apply @eq-transformer-flops:
+For LLaMA-65B [@touvron2023llama] with model dimension $d = 8192$, sequence length $n = 2048$, batch size $B = 1$, $L = 80$ layers, and $n_h = 64$ attention heads, we apply @eq-transformer-flops:
 $$
 \begin{aligned}
 \FLOPs_{\text{forward}} &= B \cdot L \cdot \bigl(24nd^2 + 4n^2 d\bigr) \\

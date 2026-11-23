@@ -5,7 +5,7 @@ project:
 book:
   title: "Deep Learning<br>for the GPU Poor"
   author: "Dr Harry Coppock"
-  date: "2026-02-25"
+  date: "2026-11-23"
   chapters:
     - index.qmd
     - chapters/computational-foundations.qmd
@@ -16,6 +16,9 @@ book:
     - part: "Appendices"
       chapters:
         - appendices/symbols.qmd
+
+language:
+  title-block-published: "Last updated"
 
 bibliography: references.bib
 reference-section-title: References
