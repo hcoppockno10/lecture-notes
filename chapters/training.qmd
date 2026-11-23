@@ -137,6 +137,70 @@ class _Float8Matmul(torch.autograd.Function):
 To enable FP8, every eligible `nn.Linear` in the model is converted to a `Float8Linear` that uses `_Float8Matmul` internally.
 :::
 
+## The Muon Optimiser {#sec-muon}
+
+Adam [@kingma2014adam] has been the default optimiser in deep learning for a decade. Muon (**M**oment**U**m **O**rthogonalised by **N**ewton--Schulz) [@jordan2024muon] is the first optimiser to seriously challenge it at scale. Moonshot AI scaled it up and found that it reaches the same loss as AdamW with roughly **half the training compute** (@fig-muon) [@liu2025muon].
+
+[Moonshot went on to train Kimi K2, a 1T-parameter MoE, with MuonClip, a Muon variant that adds a fix for exploding attention logits [@kimik2].]{.column-margin}
+
+![Scaling-law fits for Muon vs AdamW. Muon matches AdamW's loss using $0.52\times$ the FLOPs. Source: @liu2025muon.](../figures/muon-scaling-law.svg){#fig-muon}
+
+**What is wrong with Adam?** Adam updates every parameter independently, so it treats a weight matrix $\mathbf{W} \in \R^{A \times B}$ as $AB$ unrelated numbers. But a weight matrix is a *linear map*. What matters is how an update changes that map: which input directions get sent to which output directions. In practice, the gradient (and momentum) matrices of transformer layers are close to low rank, with a handful of singular directions dominating [@jordan2024muon]. A step along such a matrix mostly reinforces those few directions, while directions with small singular values (rare, but possibly important) barely move.
+
+Muon seeks to equally weight all primary update directions by taking the singular value decomposition (SVD) of the momentum matrix $\mathbf{M} \in \R^{A \times B}$:
+
+$$
+\mathbf{M} = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^{\!\top} = \sum_{i=1}^{r} \sigma_i\, \mathbf{u}_i \mathbf{v}_i^{\!\top}.
+$$
+
+It then throws away the singular values and keeps only the singular vectors:
+
+$$
+\mathbf{O} = \mathrm{Orth}(\mathbf{M}) = \mathbf{U}\mathbf{V}^{\!\top} = \sum_{i=1}^{r} \mathbf{u}_i \mathbf{v}_i^{\!\top}.
+$$ {#eq-muon-orth}
+
+Every direction the gradient points in is kept, but every one now gets a step of the same size. The dominant directions can no longer drown out the rest.
+
+The Muon update for one weight matrix is:
+
+$$
+\begin{aligned}
+\mathbf{M}_t &= \mu\, \mathbf{M}_{t-1} + \mathbf{G}_t, \\
+\mathbf{O}_t &= \mathrm{NewtonSchulz}(\mathbf{M}_t) \approx \mathbf{U}_t \mathbf{V}_t^{\!\top}, \\
+\mathbf{W}_t &= \mathbf{W}_{t-1} - \eta_t \big( \mathbf{O}_t + \lambda\, \mathbf{W}_{t-1} \big),
+\end{aligned}
+$$ {#eq-muon}
+
+where $\mathbf{G}_t$ is the gradient, $\mu \approx 0.95$ is the momentum coefficient, $\eta_t$ is the learning rate and $\lambda$ is the weight decay. In practice $\mathbf{O}_t$ is also rescaled by a shape-dependent factor so that Muon can reuse AdamW's learning rate and weight decay; see @jordan2024muon and @liu2025muon for the details.
+
+Computing an exact SVD of every weight matrix at every step would be far too slow, so Muon approximates $\mathbf{U}\mathbf{V}^{\!\top}$ with a few *Newton--Schulz* iterations, which use only matrix multiplications and so run efficiently on GPUs. See @jordan2024muon for how this works, and @amsel2025polarexpress for an improved variant.
+
+[Muon is used only for the 2D weight matrices in the hidden layers (attention projections, MLP). Embeddings, the LM head, normalisation gains and biases are still trained with AdamW. An embedding is a lookup table rather than a linear map acting on dense inputs, and empirically AdamW simply works better for these parameters.]{.column-margin}
+
+### No Second Moment Required
+
+Recall Adam's update (@sec-memory-training), which tracks two running averages per parameter:
+
+$$
+\begin{aligned}
+\mathbf{m}_t &= \beta_1 \mathbf{m}_{t-1} + (1-\beta_1)\,\mathbf{g}_t, \\
+\mathbf{v}_t &= \beta_2 \mathbf{v}_{t-1} + (1-\beta_2)\,\mathbf{g}_t^2, \\
+\Delta\mathbf{w} &= -\eta\, \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}.
+\end{aligned}
+$$
+
+The second moment $\mathbf{v}$ is there to *normalise*. Dividing by $\sqrt{\mathbf{v}}$ makes each coordinate's step roughly $\eta$ in size, however large or small its gradients are.
+
+Muon's orthogonalisation already performs this normalisation, but for the matrix as a whole rather than coordinate by coordinate: setting every singular value to 1 fixes the size of the update, whatever the scale or conditioning of the gradient.
+
+The practical payoff is memory. Muon stores only the momentum buffer, so for every matrix it manages, the optimiser state halves from $8P$ to $4P$ bytes. The FP32 training tally from @eq-training-memory becomes
+
+$$
+\underbrace{4P}_{\text{weights}} + \underbrace{4P}_{\text{gradients}} + \underbrace{4P}_{\text{Muon momentum}} = 12P \;\text{bytes},
+$$
+
+a 25% saving over $16P$ (the AdamW-managed embeddings and LM head still keep both moments). In a sharded (ZeRO-style) setup there is also half as much optimiser state to partition across GPUs.
+
 ## Mixture of Experts {#sec-moe}
 
 For a standard transformer, roughly two thirds of the parameters in a network reside in the feed-forward (MLP) layers and each MLP matrix is applied independently to each token/representation. Mixture of Experts architectures deviate from this by routing each token to a subset of specialised sub-networks. This results in each token seeing far fewer parameters than than the full model, allowing the total number of parameters to grow much larger than the compute budget would normally allow.
