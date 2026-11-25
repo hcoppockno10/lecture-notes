@@ -179,7 +179,7 @@ On Friday you can put what you have learnt into practice in **Running Up That Hi
 You start from a deliberately dumb language model and make it better, one change at a time. Every submission is retrained from scratch for **5 minutes on a single NVIDIA L4** and scored in bits per byte on a held-out test set: lower is better.
 
 - **Leaderboard:** [harrycoppock.com/RunningUpThatHill](https://harrycoppock.com/RunningUpThatHill/), with every attempt, its training curve, and what each model writes when asked to continue *"Deep Learning is all about"*.
-- **To take part,** send Harry your GitHub username so you can be added to the competition repository. The rules and setup instructions are in its README.
+- **To take part,** fork [the competition repository](https://github.com/harrygcoppock/RunningUpThatHill) and open a pull request with your change. The rules and setup instructions are in its README.
 
 The same estimation skills you use in these questions (counting FLOPs and memory, choosing number formats, and reasoning about how to spend a fixed compute budget) will be your main tools.
 :::
