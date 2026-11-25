@@ -173,9 +173,13 @@ class LoRALayer(nn.Module):
 ## Putting It Into Practice {.unnumbered}
 
 ::: {.callout-tip}
-## Coming on Friday: A Pretraining Efficiency Competition
+## Friday: Running Up That Hill, a Pretraining Efficiency Competition
 
-On Friday there will be an opportunity to put what you have learnt into practice in a **pretraining efficiency competition**.
+On Friday you can put what you have learnt into practice in **Running Up That Hill**, a pretraining efficiency competition.
+You start from a deliberately dumb language model and make it better, one change at a time. Every submission is retrained from scratch for **5 minutes on a single NVIDIA L4** and scored in bits per byte on a held-out test set: lower is better.
 
-*Full details, rules and setup instructions will be posted here before the session.*
+- **Leaderboard:** [harrycoppock.com/RunningUpThatHill](https://harrycoppock.com/RunningUpThatHill/), with every attempt, its training curve, and what each model writes when asked to continue *"Deep Learning is all about"*.
+- **To take part,** send Harry your GitHub username so you can be added to the competition repository. The rules and setup instructions are in its README.
+
+The same estimation skills you use in these questions (counting FLOPs and memory, choosing number formats, and reasoning about how to spend a fixed compute budget) will be your main tools.
 :::
